@@ -63,7 +63,7 @@
   <thead>
     <tr>
       <th>Score</th><th>Business</th><th>Contact</th><th>Website</th><th>Rating</th>
-      <th>Status</th><th>Next follow-up</th><th>Notes</th><th>Deal ₹</th>
+      <th>Status</th><th>Next follow-up</th><th>Notes</th><th>Deal ₹</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -71,7 +71,8 @@
     <tr data-id="{{ l.place_id }}">
       <td><span class="badge {{ l.group|lower }}" title="{{ l.score_reasons }}">{{ l.score }} · {{ l.group }}</span></td>
       <td class="biz">
-        <a href="{{ l.maps_link }}" target="_blank" rel="noopener"><b>{{ l.name }}</b></a>
+        <a href="{{ url_for('lead_detail', place_id=l.place_id, back=request.full_path) }}"><b>{{ l.name }}</b></a>
+        {% if l.contact_count %}<span class="muted small"> · {{ l.contact_count }} call{{ 's' if l.contact_count != 1 }}{% if l.last_outcome %}, last: {{ l.last_outcome }}{% endif %}</span>{% endif %}
         <small>{{ l.category or (l.categories|join(', ')) }}</small>
         <small class="muted">{{ l.address }}</small>
       </td>
@@ -94,9 +95,13 @@
           {% for s in statuses %}<option {{ 'selected' if l.lead_status == s }}>{{ s }}</option>{% endfor %}
         </select>
       </td>
-      <td><input type="date" data-field="next_follow_up" value="{{ l.next_follow_up }}"></td>
+      <td>
+        <input type="date" data-field="next_follow_up" value="{{ l.next_follow_up }}">
+        {% if l.next_follow_up_at and l.next_follow_up_at|length > 10 %}<small class="muted">at {{ l.next_follow_up_at[11:16] }}</small>{% endif %}
+      </td>
       <td><textarea data-field="notes" rows="2" placeholder="Add a note">{{ l.notes }}</textarea></td>
-      <td><input type="number" data-field="deal_value_inr" value="{{ l.deal_value_inr if l.deal_value_inr is not none }}" class="narrow" min="0"></td>
+      <td><input type="number" data-field="deal_value_inr" value="{{ l.deal_value_inr|int if l.deal_value_inr is not none }}" class="narrow" min="0"></td>
+      <td><a class="btn secondary nowrap" href="{{ url_for('lead_detail', place_id=l.place_id, back=request.full_path) }}#log-call">Log call</a></td>
     </tr>
   {% endfor %}
   </tbody>

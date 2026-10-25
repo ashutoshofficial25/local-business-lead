@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.name }} · Lead Finder{% endblock %}
+{% block content %}
+
+<a class="back" href="{{ back }}">← Back to leads</a>
+
+<header class="lead-head">
+  <div>
+    <h1>{{ lead.name }}</h1>
+    <p class="muted">{{ lead.category or (lead.categories|join(', ')) }} · {{ lead.address }}</p>
+    <div class="chips">
+      <span class="badge {{ lead.group|lower }}" title="{{ lead.score_reasons }}">{{ lead.score }} · {{ lead.group }}</span>
+      <span class="chip s-{{ lead.lead_status|lower|replace(' ', '-') }}">{{ lead.lead_status }}</span>
+      {% if lead.contact_count %}<span class="chip">{{ lead.contact_count }} contact{{ 's' if lead.contact_count != 1 }}</span>{% endif %}
+      {% if lead.next_follow_up %}
+        <span class="chip {{ 'late' if lead.next_follow_up < now_local[:10] }}">Next: {{ (lead.next_follow_up_at or lead.next_follow_up)|when }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    {% if lead.phone %}
+      <a class="btn" href="tel:{{ lead.phone }}">Call</a>
+      <a class="btn wa-btn" href="https://wa.me/{{ lead.phone|wa }}" target="_blank" rel="noopener">WhatsApp</a>
+    {% endif %}
+    {% if lead.maps_link %}<a class="btn secondary" href="{{ lead.maps_link }}" target="_blank" rel="noopener">Google Maps</a>{% endif %}
+    {% if lead.website %}<a class="btn secondary" href="{{ lead.website }}" target="_blank" rel="noopener">Website</a>{% endif %}
+  </div>
+</header>
+
+{% if request.args.saved %}<div class="notice ok">Call saved.</div>{% endif %}
+{% if request.args.error %}<div class="notice bad">{{ request.args.error }}</div>{% endif %}
+
+<div class="lead-grid">
+
+  <!-- Left: everything we collected -->
+  <div>
+    <section class="card">
+      <h2>Collected data</h2>
+      <dl class="facts">
+        <dt>Business name</dt><dd>{{ lead.name }}</dd>
+        <dt>Google category</dt><dd>{{ lead.category or '—' }}</dd>
+        <dt>Found in searches</dt><dd>{{ lead.categories|join(', ') or '—' }}</dd>
+        <dt>Area</dt><dd>{{ lead.location|join(', ') if lead.location is not string else lead.location }}</dd>
+        <dt>Address</dt><dd>{{ lead.address or '—' }}</dd>
+        <dt>Phone</dt><dd>{% if lead.phone %}<a href="tel:{{ lead.phone }}">{{ lead.phone }}</a>{% else %}—{% endif %}</dd>
+        <dt>Website</dt>
+        <dd>
+          {% if lead.website %}<a href="{{ lead.website }}" target="_blank" rel="noopener">{{ lead.website }}</a>
+            {% if 'social media only' in (lead.score_reasons or '') %} <span class="tag">Social only</span>{% endif %}
+          {% else %}<span class="tag none">No website</span>{% endif %}
+        </dd>
+        <dt>Google rating</dt><dd>{% if lead.rating %}★ {{ lead.rating }} from {{ lead.reviews }} reviews{% else %}—{% endif %}</dd>
+        <dt>Business status</dt><dd>{{ (lead.status or '—')|replace('_', ' ')|capitalize }}</dd>
+        <dt>Location</dt>
+        <dd>{% if lead.lat %}<a href="https://www.google.com/maps?q={{ lead.lat }},{{ lead.lng }}" target="_blank" rel="noopener">{{ '%.5f'|format(lead.lat) }}, {{ '%.5f'|format(lead.lng) }}</a>{% else %}—{% endif %}</dd>
+        <dt>Google place ID</dt><dd class="mono">{{ lead.place_id }}</dd>
+        <dt>First found</dt><dd>{{ lead.created_at|local }}</dd>
+        <dt>Data refreshed</dt><dd>{{ lead.updated_at|local }}</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Opportunity score: {{ lead.score }}</h2>
+      <ul class="reasons">
+        {% for r in (lead.score_reasons or '').split('; ') if r %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Lead details</h2>
+      <div class="form-stack">
+        <label>Status
+          <select data-field="lead_status" class="status s-{{ lead.lead_status|lower|replace(' ', '-') }}">
+            {% for s in statuses %}<option {{ 'selected' if lead.lead_status == s }}>{{ s }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Contact person (owner / manager)
+          <input data-field="contact_person" value="{{ lead.contact_person or '' }}" placeholder="e.g. Mr. Sharma (owner)">
+        </label>
+        <label>Deal value (₹)
+          <input type="number" data-field="deal_value_inr" min="0" value="{{ lead.deal_value_inr|int if lead.deal_value_inr is not none }}">
+        </label>
+        <label>Next follow-up
+          <input type="datetime-local" data-field="next_follow_up_at" value="{{ lead.next_follow_up_at or ((lead.next_follow_up ~ 'T10:00') if lead.next_follow_up else '') }}">
+        </label>
+        <label>General notes
+          <textarea data-field="notes" rows="3" placeholder="Anything to remember about this business">{{ lead.notes }}</textarea>
+        </label>
+      </div>
+      <p class="muted small">Changes save automatically.</p>
+    </section>
+  </div>
+
+  <!-- Right: log a call + history -->
+  <div>
+    <section class="card" id="log-call">
+      <h2>Log a call / contact</h2>
+      <form method="post" action="{{ url_for('add_disposition', place_id=lead.place_id) }}" class="form-stack" id="disp-form">
+        <div class="row2">
+          <label>How
+            <select name="channel">
+              {% for c in channels %}<option>{{ c }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>When
+            <input type="datetime-local" name="contacted_at" value="{{ now_local }}">
+          </label>
+        </div>
+
+        <fieldset class="outcomes">
+          <legend>Outcome</legend>
+          {% for o in outcomes %}
+            <label class="pill"><input type="radio" name="outcome" value="{{ o }}" data-status="{{ outcomes[o] or '' }}" required> {{ o }}</label>
+          {% endfor %}
+        </fieldset>
+
+        <label>Spoke with
+          <input name="contact_person" value="{{ lead.contact_person or '' }}" placeholder="Name / role">
+        </label>
+
+        <label>Call note
+          <textarea name="note" rows="3" placeholder="What did they say? Budget, needs, objections…"></textarea>
+        </label>
+
+        <label class="check"><input type="checkbox" name="needs_follow_up" value="1" id="needs-fu"> Needs follow-up</label>
+        <div id="fu-box" class="fu-box" hidden>
+          <label>Next call on
+            <input type="datetime-local" name="next_follow_up_at" id="fu-at" value="{{ tomorrow_11 }}">
+          </label>
+          <div class="quick">
+            <button type="button" class="btn secondary" data-add-hours="2">In 2 hours</button>
+            <button type="button" class="btn secondary" data-add-days="1">Tomorrow</button>
+            <button type="button" class="btn secondary" data-add-days="3">In 3 days</button>
+            <button type="button" class="btn secondary" data-add-days="7">Next week</button>
+          </div>
+        </div>
+
+        <label>Update lead status to
+          <select name="lead_status" id="status-after">
+            <option value="">Automatic (based on outcome)</option>
+            {% for s in statuses %}<option>{{ s }}</option>{% endfor %}
+          </select>
+        </label>
+
+        <button type="submit">Save call</button>
+      </form>
+    </section>
+
+    <section class="card" id="history">
+      <h2>Call history <span class="muted">({{ dispositions|length }})</span></h2>
+      {% if not dispositions %}
+        <p class="muted">No calls logged yet.</p>
+      {% else %}
+      <ol class="timeline">
+        {% for d in dispositions %}
+        <li data-id="{{ d.id }}">
+          <div class="t-head">
+            <b>{{ d.outcome }}</b>
+            <span class="muted">· {{ d.channel }} · {{ d.contacted_at|when }}</span>
+            <button type="button" class="btn-link del" title="Delete this entry">Delete</button>
+          </div>
+          {% if d.contact_person %}<div class="muted small">Spoke with {{ d.contact_person }}</div>{% endif %}
+          {% if d.note %}<p class="t-note">{{ d.note }}</p>{% endif %}
+          <div class="small">
+            Status → <b>{{ d.status_after }}</b>
+            {% if d.next_follow_up_at %} · Follow up: <b>{{ d.next_follow_up_at|when }}</b>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const placeId = {{ lead.place_id|tojson }};
+  const toast = document.getElementById('toast');
+  function show(msg, bad) {
+    toast.textContent = msg;
+    toast.className = 'toast show' + (bad ? ' bad' : '');
+    clearTimeout(show.t);
+    show.t = setTimeout(() => toast.className = 'toast', 1500);
+  }
+
+  // Auto-save lead fields
+  document.querySelectorAll('[data-field]').forEach(el => {
+    el.addEventListener('change', async () => {
+      const body = {[el.dataset.field]: el.value};
+      const res = await fetch('/api/leads/' + encodeURIComponent(placeId), {
+        method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      });
+      show(res.ok ? 'Saved' : 'Could not save', !res.ok);
+    });
+  });
+
+  // Follow-up box
+  const needs = document.getElementById('needs-fu');
+  const box = document.getElementById('fu-box');
+  const at = document.getElementById('fu-at');
+  needs.addEventListener('change', () => { box.hidden = !needs.checked; at.required = needs.checked; });
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  box.querySelectorAll('[data-add-days],[data-add-hours]').forEach(b => b.addEventListener('click', () => {
+    const d = new Date();
+    if (b.dataset.addHours) { d.setHours(d.getHours() + Number(b.dataset.addHours)); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15); }
+    else { d.setDate(d.getDate() + Number(b.dataset.addDays)); d.setHours(11, 0, 0, 0); }
+    at.value = fmt(d);
+  }));
+
+  // Outcomes that usually need a follow-up tick the box automatically
+  const followUpOutcomes = ['No answer', 'Busy / call back', 'Connected - interested', 'Demo scheduled', 'Proposal sent', 'Negotiating', 'Demo shown'];
+  document.querySelectorAll('input[name=outcome]').forEach(r => r.addEventListener('change', () => {
+    const want = followUpOutcomes.includes(r.value);
+    needs.checked = want; box.hidden = !want; at.required = want;
+    if (r.value === 'Busy / call back' || r.value === 'No answer') {
+      const d = new Date(); d.setHours(d.getHours() + 2); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0); at.value = fmt(d);
+    }
+  }));
+
+  // Delete a history entry
+  document.querySelectorAll('.timeline .del').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this call entry?')) return;
+    const li = btn.closest('li');
+    const res = await fetch('/api/dispositions/' + li.dataset.id, {method: 'DELETE'});
+    if (res.ok) { li.remove(); show('Deleted'); } else { show('Could not delete', true); }
+  }));
+</script>
+{% endblock %}

@@ -10,7 +10,8 @@
   <header class="topbar">
     <a class="brand" href="{{ url_for('index') }}">Lead Finder</a>
     <nav>
-      <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' }}">Leads</a>
+      <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint in ('index', 'lead_detail') }}">Leads</a>
+      <a href="{{ url_for('follow_ups_page') }}" class="{{ 'active' if request.endpoint == 'follow_ups_page' }}">Follow-ups{% if due_count %} <span class="count-badge">{{ due_count }}</span>{% endif %}</a>
       <a href="{{ url_for('search_page') }}" class="{{ 'active' if request.endpoint in ('search_page', 'search_status_page') }}">Find businesses</a>
     </nav>
   </header>

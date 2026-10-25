@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Follow-ups · Lead Finder{% endblock %}
+{% block content %}
+
+<h1>Follow-ups</h1>
+<p class="muted">Leads you planned to contact again (next 7 days). Won and Lost leads are hidden.</p>
+
+{% set sections = [
+  ('overdue', 'Overdue', 'Missed — call these first'),
+  ('today', 'Today', ''),
+  ('upcoming', 'Next 7 days', ''),
+] %}
+
+{% for key, title, sub in sections %}
+  <section class="fu-section {{ key }}">
+    <h2>{{ title }} <span class="muted">({{ groups[key]|length }})</span>{% if sub and groups[key] %} <small class="muted">{{ sub }}</small>{% endif %}</h2>
+    {% if not groups[key] %}
+      <p class="muted">Nothing here.</p>
+    {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Business</th><th>Status</th><th>Last outcome</th><th>Phone</th><th></th></tr></thead>
+        <tbody>
+        {% for l in groups[key] %}
+          <tr>
+            <td class="nowrap {{ 'late' if key == 'overdue' or l.is_late }}"><b>{{ (l.next_follow_up_at or l.next_follow_up)|when }}</b></td>
+            <td class="biz">
+              <a href="{{ url_for('lead_detail', place_id=l.place_id, back=url_for('follow_ups_page')) }}"><b>{{ l.name }}</b></a>
+              <small class="muted">{{ l.contact_person or l.category }}</small>
+            </td>
+            <td><span class="chip s-{{ l.lead_status|lower|replace(' ', '-') }}">{{ l.lead_status }}</span></td>
+            <td>{{ l.last_outcome or '—' }}{% if l.last_contact %}<br><small class="muted">{{ l.last_contact|when }}</small>{% endif %}</td>
+            <td class="nowrap">
+              {% if l.phone %}<a href="tel:{{ l.phone }}">{{ l.phone }}</a><br>
+              <a class="wa" href="https://wa.me/{{ l.phone|wa }}" target="_blank" rel="noopener">WhatsApp</a>{% else %}—{% endif %}
+            </td>
+            <td><a class="btn secondary" href="{{ url_for('lead_detail', place_id=l.place_id, back=url_for('follow_ups_page')) }}#log-call">Log call</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+{% endfor %}
+{% endblock %}
