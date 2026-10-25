@@ -7,7 +7,10 @@ collects name, phone, website, rating, reviews etc., scores each business for
 "website / app opportunity", and saves everything to an Excel file sorted by score.
 
 Usage:
-    export GOOGLE_MAPS_API_KEY="your-key"
+    cp .env.example .env      # then put your API key (and default location) in .env
+    python places_leads.py
+
+    # Or override any setting on the command line:
     python places_leads.py --location "Your City" --lat 26.76 --lng 83.37 --radius 8000
 
     # Search a grid of smaller circles to find many more businesses (costs more API calls):
@@ -259,21 +262,50 @@ def save_xlsx(rows, path):
 
 # -------------------------------------------------------------------------- main
 
+def load_env(path=".env"):
+    """Load KEY=VALUE lines from a .env file into os.environ (existing env vars win)."""
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.strip().strip('"').strip("'")
+            if value:
+                os.environ.setdefault(key.strip(), value)
+
+
+def env_float(name):
+    v = os.environ.get(name)
+    return float(v) if v else None
+
+
 def main():
+    load_env(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+    load_env(".env")
+
     p = argparse.ArgumentParser(description="Get scored local business leads from Google Places API.")
-    p.add_argument("--location", required=True, help='Area name added to each search, e.g. "Civil Lines, Your City"')
-    p.add_argument("--lat", type=float, help="Centre latitude (recommended)")
-    p.add_argument("--lng", type=float, help="Centre longitude (recommended)")
-    p.add_argument("--radius", type=float, default=5000, help="Search radius in metres (default 5000, max 50000)")
-    p.add_argument("--grid", type=int, default=1, help="Split area into N x N cells for more results (default 1)")
-    p.add_argument("--categories", help="Comma-separated categories (default: built-in list of 18)")
+    p.add_argument("--location", default=os.environ.get("LOCATION"),
+                   help='Area name added to each search, e.g. "Civil Lines, Your City" (or LOCATION in .env)')
+    p.add_argument("--lat", type=float, default=env_float("LAT"), help="Centre latitude (or LAT in .env)")
+    p.add_argument("--lng", type=float, default=env_float("LNG"), help="Centre longitude (or LNG in .env)")
+    p.add_argument("--radius", type=float, default=env_float("RADIUS") or 5000,
+                   help="Search radius in metres (default 5000, max 50000)")
+    p.add_argument("--grid", type=int, default=int(os.environ.get("GRID") or 1),
+                   help="Split area into N x N cells for more results (default 1)")
+    p.add_argument("--categories", default=os.environ.get("CATEGORIES"),
+                   help="Comma-separated categories (default: built-in list of 18)")
     p.add_argument("--output", default="business_leads", help="Output file name without extension")
     p.add_argument("--include-closed", action="store_true", help="Keep permanently/temporarily closed businesses")
     p.add_argument("--api-key", default=os.environ.get("GOOGLE_MAPS_API_KEY"), help="Or set GOOGLE_MAPS_API_KEY")
     args = p.parse_args()
 
     if not args.api_key:
-        sys.exit("Missing API key. Set GOOGLE_MAPS_API_KEY or pass --api-key.")
+        sys.exit("Missing API key. Add GOOGLE_MAPS_API_KEY to .env (see .env.example) or pass --api-key.")
+    if not args.location:
+        sys.exit("Missing location. Add LOCATION to .env or pass --location.")
     if args.grid > 1 and (args.lat is None or args.lng is None):
         sys.exit("--grid needs --lat and --lng.")
 

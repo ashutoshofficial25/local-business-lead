@@ -21,17 +21,35 @@ Never commit your API key to GitHub.
 pip install -r requirements.txt
 ```
 
-## 3. Run
-
-Find your area's latitude/longitude by right-clicking the spot on Google Maps.
+## 3. Add your settings to `.env`
 
 ```bash
-# Mac / Linux
-export GOOGLE_MAPS_API_KEY="your-key"
-# Windows (PowerShell)
-$env:GOOGLE_MAPS_API_KEY="your-key"
+cp .env.example .env       # Windows: copy .env.example .env
+```
 
-python places_leads.py --location "Your City" --lat 26.76 --lng 83.37 --radius 8000
+Open `.env` and fill in:
+
+```
+GOOGLE_MAPS_API_KEY=your-key
+LOCATION=Your City
+LAT=26.76
+LNG=83.37
+RADIUS=8000
+```
+
+Find your area's latitude/longitude by right-clicking the spot on Google Maps.
+`.env` is in `.gitignore`, so your key is never pushed to GitHub.
+
+## 4. Run
+
+```bash
+python places_leads.py
+```
+
+Any command-line option overrides the value in `.env`, for example:
+
+```bash
+python places_leads.py --categories "restaurants,gyms" --grid 2
 ```
 
 Options:
@@ -48,7 +66,7 @@ Options:
 
 Google returns at most 60 results per search, so use `--grid` for busy categories.
 
-## 4. Output
+## 5. Output
 
 - `business_leads.xlsx` — **Leads** sheet sorted by score (Hot / Warm / Later), with
   tracking columns (lead status dropdown, follow-up dates, notes, deal value) and a
