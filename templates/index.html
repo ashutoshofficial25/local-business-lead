@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Leads · Lead Finder{% endblock %}
+{% block content %}
+
+<section class="stats">
+  <a class="stat" href="{{ url_for('index') }}"><b>{{ stats.total }}</b><span>Businesses</span></a>
+  <a class="stat hot" href="{{ url_for('index', group='Hot') }}"><b>{{ stats.hot }}</b><span>Hot leads</span></a>
+  <a class="stat warm" href="{{ url_for('index', group='Warm') }}"><b>{{ stats.warm }}</b><span>Warm leads</span></a>
+  <a class="stat" href="{{ url_for('index', no_website=1) }}"><b>{{ stats.no_website }}</b><span>No website</span></a>
+  <a class="stat" href="{{ url_for('index', follow_up_due=1, sort='follow_up') }}"><b>{{ stats.follow_up_due }}</b><span>Follow-ups due</span></a>
+  <a class="stat won" href="{{ url_for('index', lead_status='Won') }}"><b>{{ stats.won }}</b><span>Won</span></a>
+</section>
+
+<form class="filters" method="get">
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Search name, address, phone, notes">
+  <select name="group">
+    <option value="">All groups</option>
+    {% for g in ['Hot', 'Warm', 'Later'] %}<option {{ 'selected' if filters.group == g }}>{{ g }}</option>{% endfor %}
+  </select>
+  <select name="lead_status">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option {{ 'selected' if filters.lead_status == s }}>{{ s }}</option>{% endfor %}
+  </select>
+  <select name="category">
+    <option value="">All categories</option>
+    {% for c in categories %}<option {{ 'selected' if filters.category == c }}>{{ c }}</option>{% endfor %}
+  </select>
+  {% if locations|length > 1 %}
+  <select name="location">
+    <option value="">All areas</option>
+    {% for l in locations %}<option {{ 'selected' if filters.location == l }}>{{ l }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <input type="number" name="min_reviews" value="{{ filters.min_reviews }}" placeholder="Min reviews" min="0" class="narrow">
+  <label class="check"><input type="checkbox" name="no_website" value="1" {{ 'checked' if filters.no_website }}> No website</label>
+  <label class="check"><input type="checkbox" name="follow_up_due" value="1" {{ 'checked' if filters.follow_up_due }}> Follow-up due</label>
+  <select name="sort">
+    {% for key, label in [('score','Best score'),('reviews','Most reviews'),('rating','Best rating'),('name','Name A–Z'),('newest','Newest'),('follow_up','Follow-up date')] %}
+      <option value="{{ key }}" {{ 'selected' if (filters.sort or 'score') == key }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+  <a class="btn-link" href="{{ url_for('index') }}">Clear</a>
+  <span class="spacer"></span>
+  <a class="btn secondary" href="{{ url_for('export_xlsx', **request.args) }}">Excel</a>
+  <a class="btn secondary" href="{{ url_for('export_csv', **request.args) }}">CSV</a>
+</form>
+
+{% if total == 0 %}
+  <div class="empty">
+    {% if stats.total == 0 %}
+      <h2>No businesses yet</h2>
+      <p>Run your first search to fill your lead list.</p>
+      <a class="btn" href="{{ url_for('search_page') }}">Find businesses</a>
+    {% else %}
+      <p>No businesses match these filters.</p>
+    {% endif %}
+  </div>
+{% else %}
+<p class="count">{{ total }} result{{ 's' if total != 1 }}</p>
+<div class="table-wrap">
+<table class="leads">
+  <thead>
+    <tr>
+      <th>Score</th><th>Business</th><th>Contact</th><th>Website</th><th>Rating</th>
+      <th>Status</th><th>Next follow-up</th><th>Notes</th><th>Deal ₹</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for l in leads %}
+    <tr data-id="{{ l.place_id }}">
+      <td><span class="badge {{ l.group|lower }}" title="{{ l.score_reasons }}">{{ l.score }} · {{ l.group }}</span></td>
+      <td class="biz">
+        <a href="{{ l.maps_link }}" target="_blank" rel="noopener"><b>{{ l.name }}</b></a>
+        <small>{{ l.category or (l.categories|join(', ')) }}</small>
+        <small class="muted">{{ l.address }}</small>
+      </td>
+      <td class="nowrap">
+        {% if l.phone %}
+          <a href="tel:{{ l.phone }}">{{ l.phone }}</a><br>
+          <a class="wa" href="https://wa.me/{{ l.phone|wa }}" target="_blank" rel="noopener">WhatsApp</a>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td>
+        {% if l.website and 'no website' not in (l.score_reasons or '') %}
+          <a href="{{ l.website }}" target="_blank" rel="noopener" class="site">Visit</a>
+        {% elif l.website %}
+          <a href="{{ l.website }}" target="_blank" rel="noopener" class="tag">Social only</a>
+        {% else %}<span class="tag none">None</span>{% endif %}
+      </td>
+      <td class="nowrap">{% if l.rating %}★ {{ l.rating }}<br><small class="muted">{{ l.reviews }} reviews</small>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>
+        <select data-field="lead_status" class="status s-{{ l.lead_status|lower|replace(' ', '-') }}">
+          {% for s in statuses %}<option {{ 'selected' if l.lead_status == s }}>{{ s }}</option>{% endfor %}
+        </select>
+      </td>
+      <td><input type="date" data-field="next_follow_up" value="{{ l.next_follow_up }}"></td>
+      <td><textarea data-field="notes" rows="2" placeholder="Add a note">{{ l.notes }}</textarea></td>
+      <td><input type="number" data-field="deal_value_inr" value="{{ l.deal_value_inr if l.deal_value_inr is not none }}" class="narrow" min="0"></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if pages > 1 %}
+<nav class="pager">
+  {% set args = request.args.to_dict() %}
+  {% if page > 1 %}{% set _ = args.update({'page': page - 1}) %}<a href="{{ url_for('index', **args) }}">← Previous</a>{% endif %}
+  <span>Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}{% set _ = args.update({'page': page + 1}) %}<a href="{{ url_for('index', **args) }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+{% endif %}
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const toast = document.getElementById('toast');
+  function show(msg, bad) {
+    toast.textContent = msg;
+    toast.className = 'toast show' + (bad ? ' bad' : '');
+    clearTimeout(show.t);
+    show.t = setTimeout(() => toast.className = 'toast', 1500);
+  }
+  async function save(el) {
+    const row = el.closest('tr');
+    const body = {};
+    body[el.dataset.field] = el.value;
+    // Changing status away from New records today as the last contact date
+    if (el.dataset.field === 'lead_status' && el.value !== 'New') {
+      body.last_contact = new Date().toISOString().slice(0, 10);
+    }
+    try {
+      const res = await fetch('/api/leads/' + encodeURIComponent(row.dataset.id), {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error();
+      if (el.dataset.field === 'lead_status') {
+        el.className = 'status s-' + el.value.toLowerCase().replace(/ /g, '-');
+      }
+      show('Saved');
+    } catch (e) {
+      show('Could not save', true);
+    }
+  }
+  document.querySelectorAll('[data-field]').forEach(el => {
+    el.addEventListener('change', () => save(el));
+  });
+</script>
+{% endblock %}

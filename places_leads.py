@@ -299,6 +299,7 @@ def main():
                    help="Comma-separated categories (default: built-in list of 18)")
     p.add_argument("--output", default="business_leads", help="Output file name without extension")
     p.add_argument("--include-closed", action="store_true", help="Keep permanently/temporarily closed businesses")
+    p.add_argument("--save-db", action="store_true", help="Also save results to MongoDB (MONGO_URI in .env)")
     p.add_argument("--api-key", default=os.environ.get("GOOGLE_MAPS_API_KEY"), help="Or set GOOGLE_MAPS_API_KEY")
     args = p.parse_args()
 
@@ -309,31 +310,9 @@ def main():
     if args.grid > 1 and (args.lat is None or args.lng is None):
         sys.exit("--grid needs --lat and --lng.")
 
-    categories = [c.strip() for c in args.categories.split(",")] if args.categories else DEFAULT_CATEGORIES
-    if args.lat is not None and args.lng is not None:
-        points = grid_points(args.lat, args.lng, args.radius, args.grid)
-    else:
-        points = [(None, None, None)]
-
-    print(f"Searching {len(categories)} categories x {len(points)} area(s) in {args.location} ...")
-    seen = {}
-    for cat in categories:
-        before = len(seen)
-        for lat, lng, rad in points:
-            for place in search_text(args.api_key, f"{cat} in {args.location}", lat, lng, rad):
-                pid = place.get("id")
-                if pid and pid not in seen:
-                    seen[pid] = to_row(place, cat)
-        print(f"  {cat:<22} +{len(seen) - before} new")
-
-    rows = list(seen.values())
-    if not args.include_closed:
-        rows = [r for r in rows if r["status"] in ("", "OPERATIONAL")]
-
-    for r in rows:
-        r["score"], r["group"], r["score_reasons"] = score_business(r)
-        r["lead_status"] = "New"
-    rows.sort(key=lambda r: (-r["score"], -(r["reviews"] or 0)))
+    categories = [c.strip() for c in args.categories.split(",") if c.strip()] if args.categories else None
+    rows = collect_leads(args.api_key, args.location, args.lat, args.lng, args.radius,
+                         args.grid, categories, args.include_closed)
 
     save_csv(rows, args.output + ".csv")
     made_xlsx = save_xlsx(rows, args.output + ".xlsx")
@@ -343,6 +322,42 @@ def main():
     no_site = sum(1 for r in rows if "no website" in r["score_reasons"])
     print(f"\nDone: {len(rows)} businesses | {no_site} without website | {hot} hot | {warm} warm")
     print(f"Saved {args.output}.csv" + (f" and {args.output}.xlsx" if made_xlsx else ""))
+
+    if args.save_db:
+        import db
+        result = db.upsert_leads(rows, location=args.location)
+        print(f"Saved to MongoDB: {result['new']} new, {result['updated']} updated")
+
+
+def collect_leads(api_key, location, lat=None, lng=None, radius=5000, grid=1,
+                  categories=None, include_closed=False, progress=print):
+    """Search every category, de-duplicate, score and sort. Used by the CLI and the web app."""
+    categories = categories or DEFAULT_CATEGORIES
+    if lat is not None and lng is not None:
+        points = grid_points(lat, lng, radius or 5000, grid or 1)
+    else:
+        points = [(None, None, None)]
+
+    progress(f"Searching {len(categories)} categories x {len(points)} area(s) in {location} ...")
+    seen = {}
+    for i, cat in enumerate(categories, start=1):
+        before = len(seen)
+        for plat, plng, rad in points:
+            for place in search_text(api_key, f"{cat} in {location}", plat, plng, rad):
+                pid = place.get("id")
+                if pid and pid not in seen:
+                    seen[pid] = to_row(place, cat)
+        progress(f"  [{i}/{len(categories)}] {cat:<22} +{len(seen) - before} new")
+
+    rows = list(seen.values())
+    if not include_closed:
+        rows = [r for r in rows if r["status"] in ("", "OPERATIONAL")]
+
+    for r in rows:
+        r["score"], r["group"], r["score_reasons"] = score_business(r)
+        r["lead_status"] = "New"
+    rows.sort(key=lambda r: (-r["score"], -(r["reviews"] or 0)))
+    return rows
 
 
 if __name__ == "__main__":

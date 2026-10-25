@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Find businesses · Lead Finder{% endblock %}
+{% block content %}
+
+<h1>Find businesses</h1>
+
+{% if not has_key %}
+  <div class="alert">
+    <b>GOOGLE_MAPS_API_KEY is missing.</b> Copy <code>.env.example</code> to <code>.env</code>, add your key, then restart the app.
+  </div>
+{% endif %}
+
+<form class="card search-form" method="post">
+  <div class="grid">
+    <label>Area / city name
+      <input name="location" value="{{ defaults.location }}" required placeholder="e.g. Civil Lines, Your City">
+    </label>
+    <label>Latitude
+      <input name="lat" value="{{ defaults.lat }}" placeholder="26.76" inputmode="decimal">
+    </label>
+    <label>Longitude
+      <input name="lng" value="{{ defaults.lng }}" placeholder="83.37" inputmode="decimal">
+    </label>
+    <label>Radius (metres)
+      <input name="radius" type="number" value="{{ defaults.radius }}" min="500" max="50000" step="500">
+    </label>
+    <label>Grid size
+      <select name="grid">
+        {% for n in [1, 2, 3, 4] %}
+          <option value="{{ n }}" {{ 'selected' if defaults.grid|string == n|string }}>{{ n }} × {{ n }}{{ ' (default)' if n == 1 }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <p class="hint">Tip: right-click your area on Google Maps to copy latitude and longitude. A bigger grid finds more businesses but makes more API calls (grid 3 = 9× calls).</p>
+
+  <fieldset>
+    <legend>Categories <button type="button" class="btn-link" id="toggle-all">Select all / none</button></legend>
+    <div class="cats">
+      {% for c in all_categories %}
+        <label class="check"><input type="checkbox" name="categories" value="{{ c }}" {{ 'checked' if c in selected }}> {{ c }}</label>
+      {% endfor %}
+    </div>
+    <label>More categories (comma-separated)
+      <input name="extra_categories" placeholder="e.g. bakeries, opticians, car repair">
+    </label>
+  </fieldset>
+
+  <label class="check"><input type="checkbox" name="include_closed"> Include closed businesses</label>
+
+  <p class="estimate" id="estimate"></p>
+  <button type="submit" {{ 'disabled' if not has_key }}>Start search</button>
+</form>
+
+{% if searches %}
+<h2>Recent searches</h2>
+<table class="simple">
+  <thead><tr><th>Started</th><th>Area</th><th>Categories</th><th>Status</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for s in searches %}
+    <tr>
+      <td class="nowrap"><a href="{{ url_for('search_status_page', search_id=s.id) }}">{{ s.started_at.strftime('%d %b %H:%M') }} UTC</a></td>
+      <td>{{ s.params.location }}</td>
+      <td>{{ s.params.categories|length }}</td>
+      <td><span class="tag {{ s.status }}">{{ s.status }}</span></td>
+      <td>{% if s.result %}{{ s.result.found }} found · {{ s.result.new }} new{% elif s.error %}<span class="muted">{{ s.error[:60] }}</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const boxes = [...document.querySelectorAll('input[name=categories]')];
+  const grid = document.querySelector('select[name=grid]');
+  const extra = document.querySelector('input[name=extra_categories]');
+  const est = document.getElementById('estimate');
+  function update() {
+    const n = boxes.filter(b => b.checked).length +
+      extra.value.split(',').filter(s => s.trim()).length;
+    const g = Number(grid.value);
+    const max = n * g * g * 3;
+    est.textContent = n ? `About ${n * g * g}–${max} API requests (${n} categories × ${g * g} areas × up to 3 pages).` : 'Pick at least one category.';
+  }
+  document.getElementById('toggle-all').onclick = () => {
+    const on = !boxes.every(b => b.checked);
+    boxes.forEach(b => b.checked = on);
+    update();
+  };
+  [...boxes, grid, extra].forEach(el => el.addEventListener('input', update));
+  update();
+</script>
+{% endblock %}

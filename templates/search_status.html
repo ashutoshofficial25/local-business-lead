@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Search progress · Lead Finder{% endblock %}
+{% block content %}
+
+<h1>Searching {{ s.params.location }}</h1>
+<p class="muted">{{ s.params.categories|length }} categories · grid {{ s.params.grid }} × {{ s.params.grid }} · radius {{ s.params.radius|int }} m</p>
+
+<div class="card">
+  <p id="status" class="status-line">Starting…</p>
+  <pre id="log" class="log"></pre>
+  <div id="done" hidden>
+    <a class="btn" href="{{ url_for('index', location=s.params.location) }}">View leads</a>
+    <a class="btn secondary" href="{{ url_for('search_page') }}">New search</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const url = "{{ url_for('search_status', search_id=s.id) }}";
+  const statusEl = document.getElementById('status');
+  const logEl = document.getElementById('log');
+  async function poll() {
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      logEl.textContent = data.log.join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+      if (data.status === 'running') {
+        statusEl.textContent = 'Running… this can take a few minutes. You can leave this page; results are saved automatically.';
+        setTimeout(poll, 2000);
+      } else if (data.status === 'done') {
+        const r = data.result;
+        statusEl.textContent = `Done: ${r.found} businesses found · ${r.new} new · ${r.updated} updated.`;
+        statusEl.className = 'status-line ok';
+        document.getElementById('done').hidden = false;
+      } else {
+        statusEl.textContent = 'Search failed: ' + data.error;
+        statusEl.className = 'status-line bad';
+        document.getElementById('done').hidden = false;
+      }
+    } catch (e) {
+      setTimeout(poll, 4000);
+    }
+  }
+  poll();
+</script>
+{% endblock %}
