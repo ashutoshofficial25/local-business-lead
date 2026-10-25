@@ -32,16 +32,68 @@ Never commit your API key to GitHub.
 Pick one:
 
 - **Docker (easiest):** `docker compose up -d` — starts MongoDB on `localhost:27017`, data is kept in a Docker volume.
+- **Mac with Homebrew:**
+  ```bash
+  brew tap mongodb/brew
+  brew install mongodb-community
+  brew services start mongodb-community
+  ```
 - **Install directly:** [MongoDB Community Server](https://www.mongodb.com/try/download/community)
   (Windows/Mac/Linux). It runs on `localhost:27017` by default.
 
-## 3. Install
+## 3. Install (with a virtual environment)
 
-Python 3.9+:
+A virtual environment (`venv`) keeps this project's packages separate. You need it on a Mac,
+where plain `pip` usually isn't available.
+
+### Mac
+
+1. Check you have Python 3.9 or newer:
+   ```bash
+   python3 --version
+   ```
+   If it's missing, install it with `xcode-select --install`, or with Homebrew: `brew install python`.
+
+2. Create and turn on the virtual environment (run inside the project folder):
+   ```bash
+   cd local-business-lead
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+   Your terminal prompt now starts with `(.venv)`.
+
+3. Install the packages:
+   ```bash
+   python -m pip install --upgrade pip
+   python -m pip install -r requirements.txt
+   ```
+
+Every time you open a new terminal, turn the venv on again before running the app:
 
 ```bash
-pip install -r requirements.txt
+cd local-business-lead
+source .venv/bin/activate
 ```
+
+Type `deactivate` to turn it off.
+
+### Windows
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+```
+
+### Linux
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+If you see `pip: command not found`, use `python -m pip` (inside the venv) instead of `pip`.
 
 ## 4. Add your settings to `.env`
 
@@ -65,11 +117,30 @@ Find your area's latitude/longitude by right-clicking the spot on Google Maps.
 
 ## 5. Run the web app
 
+With the venv turned on (`source .venv/bin/activate`):
+
 ```bash
 python app.py
 ```
 
 Open http://127.0.0.1:5000
+
+On a Mac, if port 5000 is busy ("Address already in use"), that's AirPlay Receiver. Either
+set `PORT=5050` in `.env` and open http://127.0.0.1:5050, or turn off AirPlay Receiver in
+**System Settings → General → AirDrop & Handoff**.
+
+### Quick start on Mac (all commands)
+
+```bash
+git clone https://github.com/ashutoshofficial25/local-business-lead.git
+cd local-business-lead
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env              # then open .env and add your API key + location
+brew services start mongodb-community   # or: docker compose up -d
+python app.py
+```
 
 1. Go to **Find businesses**, check the area and categories, click **Start search**.
 2. When it finishes, click **View leads**.
