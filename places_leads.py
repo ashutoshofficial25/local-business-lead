@@ -201,7 +201,8 @@ def save_csv(rows, path):
         w.writerows(rows)
 
 
-def save_xlsx(rows, path):
+def save_xlsx(rows, path, columns=None):
+    COLUMNS_ = columns or COLUMNS
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill
@@ -213,13 +214,13 @@ def save_xlsx(rows, path):
     wb = Workbook()
     ws = wb.active
     ws.title = "Leads"
-    ws.append(COLUMNS)
+    ws.append(COLUMNS_)
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="305496")
     fills = {"Hot": "F8CBAD", "Warm": "FFE699", "Later": "E2EFDA"}
     for r in rows:
-        ws.append([r.get(c, "") for c in COLUMNS])
+        ws.append([r.get(c, "") for c in COLUMNS_])
         fill = PatternFill("solid", fgColor=fills[r["group"]])
         ws.cell(row=ws.max_row, column=2).fill = fill
 
@@ -230,13 +231,13 @@ def save_xlsx(rows, path):
         allow_blank=True,
     )
     ws.add_data_validation(dv)
-    col = COLUMNS.index("lead_status") + 1
+    col = COLUMNS_.index("lead_status") + 1
     letter = ws.cell(row=1, column=col).column_letter
     dv.add(f"{letter}2:{letter}{max(ws.max_row, 2)}")
 
     widths = {"name": 32, "address": 45, "website": 30, "maps_link": 30,
               "score_reasons": 45, "notes": 30, "category": 20, "searched_for": 18}
-    for i, c in enumerate(COLUMNS, start=1):
+    for i, c in enumerate(COLUMNS_, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = widths.get(c, 13)
     ws.freeze_panes = "C2"
     ws.auto_filter.ref = ws.dimensions

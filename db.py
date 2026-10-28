@@ -2,8 +2,9 @@
 db.py - MongoDB storage for business leads.
 
 Collections:
-  leads    one document per business (keyed by Google place_id)
-  searches history of searches run from the web app (with progress log)
+  leads         one document per business (keyed by Google place_id)
+  dispositions  one document per contact attempt: outcome, note, next follow-up time
+  searches      history of searches run from the web app (with progress log)
 
 Google data (name, phone, rating, score ...) is refreshed on every search, but your own
 work (lead_status, notes, follow-up date, deal value) is never overwritten.
@@ -23,10 +24,6 @@ GOOGLE_FIELDS = [
 # Fields you edit yourself in the app
 LEAD_STATUSES = ["New", "Contacted", "Demo shown", "Interested", "Won", "Lost", "Later"]
 
-# Disposition = one logged contact attempt (kept as a list on the lead)
-DISPOSITION_TYPES = ["Call", "WhatsApp", "Visit", "Email", "Meeting"]
-DISPOSITION_OUTCOMES = ["Connected", "No answer", "Busy", "Interested", "Not interested",
-                        "Call back later", "Wrong number"]
 
 _client = None
 
@@ -54,7 +51,10 @@ def init_indexes():
     db.leads.create_index("lead_status")
     db.leads.create_index("categories")
     db.leads.create_index("location")
+    db.leads.create_index("next_follow_up")
     db.searches.create_index([("started_at", DESCENDING)])
+    db.dispositions.create_index([("place_id", ASCENDING), ("contacted_at", DESCENDING)])
+    db.dispositions.create_index("next_follow_up_at")
 
 
 def now():
@@ -79,6 +79,8 @@ def upsert_leads(rows, location=""):
                     "notes": "",
                     "last_contact": "",
                     "next_follow_up": "",
+                    "next_follow_up_at": "",
+                    "contact_count": 0,
                     "deal_value_inr": None,
                     "proposal_sent": False,
                     "created_at": now(),
@@ -151,9 +153,13 @@ def find_leads(filters, page=1, per_page=50):
     return list(cursor), total
 
 
+def get_lead(place_id):
+    return get_db().leads.find_one({"place_id": place_id}, {"_id": 0})
+
+
 def update_lead(place_id, changes):
-    allowed = {"lead_status", "notes", "last_contact", "next_follow_up", "deal_value_inr",
-               "proposal_sent"}
+    allowed = {"lead_status", "notes", "last_contact", "next_follow_up", "next_follow_up_at",
+               "deal_value_inr", "contact_person", "proposal_sent"}
     changes = {k: v for k, v in changes.items() if k in allowed}
     if "lead_status" in changes and changes["lead_status"] not in LEAD_STATUSES:
         raise ValueError("Unknown lead status")
@@ -163,15 +169,24 @@ def update_lead(place_id, changes):
     if "proposal_sent" in changes:
         changes["proposal_sent"] = changes["proposal_sent"] in (True, "true", "1", "on")
         changes["proposal_sent_at"] = now() if changes["proposal_sent"] else None
+
+    # Keep next_follow_up (date, used for filters) and next_follow_up_at (date + time) in sync
+    if "next_follow_up_at" in changes:
+        at = (changes["next_follow_up_at"] or "").strip()
+        changes["next_follow_up_at"] = at
+        changes["next_follow_up"] = at[:10]
+    elif "next_follow_up" in changes:
+        day = (changes["next_follow_up"] or "").strip()
+        old = (get_lead(place_id) or {}).get("next_follow_up_at") or ""
+        time_part = old[10:] if len(old) > 10 else ""
+        changes["next_follow_up"] = day
+        changes["next_follow_up_at"] = (day + time_part) if day else ""
+
     if not changes:
         return False
     changes["edited_at"] = now()
     res = get_db().leads.update_one({"place_id": place_id}, {"$set": changes})
     return res.matched_count == 1
-
-
-def get_lead(place_id):
-    return get_db().leads.find_one({"place_id": place_id}, {"_id": 0})
 
 
 def save_proposal(place_id, language, message):
@@ -182,30 +197,138 @@ def save_proposal(place_id, language, message):
     )
 
 
-def add_disposition(place_id, form):
-    """Log a contact attempt; also bumps last_contact and optionally status / follow-up."""
-    d = {
-        "type": form.get("type", ""),
-        "outcome": form.get("outcome", ""),
-        "note": (form.get("note") or "").strip(),
+def delete_lead(place_id):
+    get_db().dispositions.delete_many({"place_id": place_id})
+    return get_db().leads.delete_one({"place_id": place_id}).deleted_count == 1
+
+
+# -------------------------------------------------------------- dispositions
+# One document per contact attempt (call, WhatsApp, visit ...), with what happened,
+# a note, and optionally when to contact the lead next.
+
+CHANNELS = ["Call", "WhatsApp", "Visit", "Email", "Other"]
+
+# Outcome -> lead status it moves the lead to (None = keep current, but New becomes Contacted)
+OUTCOMES = {
+    "No answer": None,
+    "Busy / call back": "Contacted",
+    "Connected - interested": "Interested",
+    "Connected - not interested": "Lost",
+    "Demo scheduled": "Interested",
+    "Demo shown": "Demo shown",
+    "Proposal sent": "Interested",
+    "Negotiating": "Interested",
+    "Won": "Won",
+    "Lost": "Lost",
+    "Wrong number": "Lost",
+    "Other": None,
+}
+
+
+def local_now_str():
+    """Local time as 'YYYY-MM-DDTHH:MM' (same format as <input type=datetime-local>)."""
+    return datetime.now().strftime("%Y-%m-%dT%H:%M")
+
+
+def add_disposition(place_id, data):
+    """Log a contact attempt and update the lead (status, last contact, next follow-up)."""
+    lead = get_lead(place_id)
+    if not lead:
+        raise ValueError("Lead not found")
+
+    outcome = (data.get("outcome") or "").strip()
+    if outcome not in OUTCOMES:
+        raise ValueError("Pick an outcome")
+    channel = (data.get("channel") or "Call").strip()
+    if channel not in CHANNELS:
+        channel = "Other"
+
+    needs_follow_up = str(data.get("needs_follow_up", "")).lower() in ("1", "on", "true", "yes")
+    follow_up_at = (data.get("next_follow_up_at") or "").strip() if needs_follow_up else ""
+    if needs_follow_up and not follow_up_at:
+        raise ValueError("Pick the next follow-up date and time")
+
+    status = (data.get("lead_status") or "").strip()
+    if status and status not in LEAD_STATUSES:
+        raise ValueError("Unknown lead status")
+    if not status:
+        status = OUTCOMES[outcome] or ("Contacted" if lead.get("lead_status") == "New" else lead.get("lead_status"))
+
+    contacted_at = (data.get("contacted_at") or "").strip() or local_now_str()
+    doc = {
+        "place_id": place_id,
+        "lead_name": lead.get("name", ""),
+        "channel": channel,
+        "outcome": outcome,
+        "note": (data.get("note") or "").strip(),
+        "contact_person": (data.get("contact_person") or "").strip(),
+        "contacted_at": contacted_at,
+        "needs_follow_up": needs_follow_up,
+        "next_follow_up_at": follow_up_at,
+        "status_after": status,
         "created_at": now(),
     }
-    if d["type"] not in DISPOSITION_TYPES or d["outcome"] not in DISPOSITION_OUTCOMES:
-        raise ValueError("Pick a type and an outcome")
-    changes = {"last_contact": datetime.now().strftime("%Y-%m-%d"), "edited_at": now()}
-    if form.get("lead_status"):
-        if form["lead_status"] not in LEAD_STATUSES:
-            raise ValueError("Unknown lead status")
-        changes["lead_status"] = d["lead_status"] = form["lead_status"]
-    if form.get("next_follow_up"):
-        changes["next_follow_up"] = d["next_follow_up"] = form["next_follow_up"]
-    res = get_db().leads.update_one({"place_id": place_id},
-                                    {"$push": {"dispositions": d}, "$set": changes})
-    return res.matched_count == 1
+    res = get_db().dispositions.insert_one(doc)
+
+    lead_changes = {
+        "lead_status": status,
+        "last_contact": contacted_at[:10],
+        "last_contact_at": contacted_at,
+        "last_outcome": outcome,
+        "next_follow_up_at": follow_up_at,
+        "next_follow_up": follow_up_at[:10],
+        "edited_at": now(),
+    }
+    if doc["contact_person"]:
+        lead_changes["contact_person"] = doc["contact_person"]
+    get_db().leads.update_one(
+        {"place_id": place_id},
+        {"$set": lead_changes, "$inc": {"contact_count": 1}},
+    )
+    doc["id"] = str(res.inserted_id)
+    doc.pop("_id", None)
+    return doc
 
 
-def delete_lead(place_id):
-    return get_db().leads.delete_one({"place_id": place_id}).deleted_count == 1
+def list_dispositions(place_id):
+    docs = list(get_db().dispositions.find({"place_id": place_id})
+                .sort([("contacted_at", DESCENDING), ("created_at", DESCENDING)]))
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+    return docs
+
+
+def delete_disposition(disposition_id):
+    from bson import ObjectId
+    res = get_db().dispositions.delete_one({"_id": ObjectId(disposition_id)})
+    return res.deleted_count == 1
+
+
+def follow_ups(days_ahead=7):
+    """Leads with a next follow-up set, split into overdue / today / upcoming."""
+    from datetime import timedelta
+    now_local = datetime.now()
+    now_str = now_local.strftime("%Y-%m-%dT%H:%M")
+    today = now_local.strftime("%Y-%m-%d")
+    until = (now_local + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    closed = ["Won", "Lost"]
+    leads = list(get_db().leads.find(
+        {"next_follow_up": {"$ne": "", "$exists": True, "$lte": until},
+         "lead_status": {"$nin": closed}},
+        {"_id": 0},
+    ).sort([("next_follow_up_at", ASCENDING), ("next_follow_up", ASCENDING)]))
+
+    groups = {"overdue": [], "today": [], "upcoming": []}
+    for l in leads:
+        at = l.get("next_follow_up_at") or l.get("next_follow_up")
+        if l["next_follow_up"] < today:
+            groups["overdue"].append(l)
+        elif l["next_follow_up"] == today:
+            l["is_late"] = len(at) > 10 and at < now_str
+            groups["today"].append(l)
+        else:
+            groups["upcoming"].append(l)
+    return groups
 
 
 def stats():
