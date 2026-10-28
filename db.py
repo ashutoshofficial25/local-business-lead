@@ -23,6 +23,11 @@ GOOGLE_FIELDS = [
 # Fields you edit yourself in the app
 LEAD_STATUSES = ["New", "Contacted", "Demo shown", "Interested", "Won", "Lost", "Later"]
 
+# Disposition = one logged contact attempt (kept as a list on the lead)
+DISPOSITION_TYPES = ["Call", "WhatsApp", "Visit", "Email", "Meeting"]
+DISPOSITION_OUTCOMES = ["Connected", "No answer", "Busy", "Interested", "Not interested",
+                        "Call back later", "Wrong number"]
+
 _client = None
 
 
@@ -75,6 +80,7 @@ def upsert_leads(rows, location=""):
                     "last_contact": "",
                     "next_follow_up": "",
                     "deal_value_inr": None,
+                    "proposal_sent": False,
                     "created_at": now(),
                 },
             },
@@ -113,7 +119,15 @@ def build_query(filters):
     if filters.get("follow_up_due") in ("1", "on", "true"):
         today = datetime.now().strftime("%Y-%m-%d")
         q["next_follow_up"] = {"$ne": "", "$lte": today}
+    if filters.get("proposal") == "sent":
+        q["proposal_sent"] = True
+    elif filters.get("proposal") == "pending":
+        q.update(PROPOSAL_PENDING)
     return q
+
+
+# Not sent yet and has a phone to WhatsApp (old leads have no proposal_sent field)
+PROPOSAL_PENDING = {"proposal_sent": {"$ne": True}, "phone": {"$nin": ["", None]}}
 
 
 SORTS = {
@@ -138,17 +152,55 @@ def find_leads(filters, page=1, per_page=50):
 
 
 def update_lead(place_id, changes):
-    allowed = {"lead_status", "notes", "last_contact", "next_follow_up", "deal_value_inr"}
+    allowed = {"lead_status", "notes", "last_contact", "next_follow_up", "deal_value_inr",
+               "proposal_sent"}
     changes = {k: v for k, v in changes.items() if k in allowed}
     if "lead_status" in changes and changes["lead_status"] not in LEAD_STATUSES:
         raise ValueError("Unknown lead status")
     if "deal_value_inr" in changes:
         v = str(changes["deal_value_inr"]).strip()
         changes["deal_value_inr"] = float(v) if v else None
+    if "proposal_sent" in changes:
+        changes["proposal_sent"] = changes["proposal_sent"] in (True, "true", "1", "on")
+        changes["proposal_sent_at"] = now() if changes["proposal_sent"] else None
     if not changes:
         return False
     changes["edited_at"] = now()
     res = get_db().leads.update_one({"place_id": place_id}, {"$set": changes})
+    return res.matched_count == 1
+
+
+def get_lead(place_id):
+    return get_db().leads.find_one({"place_id": place_id}, {"_id": 0})
+
+
+def save_proposal(place_id, language, message):
+    get_db().leads.update_one(
+        {"place_id": place_id},
+        {"$push": {"proposals": {"language": language, "message": message, "created_at": now()}},
+         "$set": {"proposal_language": language}},
+    )
+
+
+def add_disposition(place_id, form):
+    """Log a contact attempt; also bumps last_contact and optionally status / follow-up."""
+    d = {
+        "type": form.get("type", ""),
+        "outcome": form.get("outcome", ""),
+        "note": (form.get("note") or "").strip(),
+        "created_at": now(),
+    }
+    if d["type"] not in DISPOSITION_TYPES or d["outcome"] not in DISPOSITION_OUTCOMES:
+        raise ValueError("Pick a type and an outcome")
+    changes = {"last_contact": datetime.now().strftime("%Y-%m-%d"), "edited_at": now()}
+    if form.get("lead_status"):
+        if form["lead_status"] not in LEAD_STATUSES:
+            raise ValueError("Unknown lead status")
+        changes["lead_status"] = d["lead_status"] = form["lead_status"]
+    if form.get("next_follow_up"):
+        changes["next_follow_up"] = d["next_follow_up"] = form["next_follow_up"]
+    res = get_db().leads.update_one({"place_id": place_id},
+                                    {"$push": {"dispositions": d}, "$set": changes})
     return res.matched_count == 1
 
 
@@ -168,6 +220,7 @@ def stats():
         "contacted": leads.count_documents({"lead_status": {"$nin": ["New"]}}),
         "won": leads.count_documents({"lead_status": "Won"}),
         "follow_up_due": leads.count_documents({"next_follow_up": {"$ne": "", "$lte": today}}),
+        "proposal_pending": leads.count_documents(PROPOSAL_PENDING),
     }
 
 

@@ -69,6 +69,8 @@ Find your area's latitude/longitude by right-clicking the spot on Google Maps.
 python app.py
 ```
 
+Or do everything (start MongoDB in Docker, create `.venv`, install, run) in one go: `./run.sh`
+
 Open http://127.0.0.1:5000
 
 1. Go to **Find businesses**, check the area and categories, click **Start search**.

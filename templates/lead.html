@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ l.name }} · Lead Finder{% endblock %}
+{% block content %}
+{# Proposals generated before history existed were stored as a single message #}
+{% set proposals = l.proposals or ([{'message': l.proposal_message, 'language': l.proposal_language, 'created_at': l.proposal_generated_at}] if l.proposal_message else []) %}
+
+<div data-id="{{ l.place_id }}">
+<p><a href="{{ request.referrer if request.referrer and '/leads/' not in request.referrer else url_for('index') }}">← Back to leads</a></p>
+
+<h1>{{ l.name }} <span class="badge {{ l.group|lower }}" title="{{ l.score_reasons }}">{{ l.score }} · {{ l.group }}</span></h1>
+<p class="muted">{{ l.category or (l.categories|join(', ')) }} · {{ l.address }}</p>
+
+<div class="detail-grid">
+  <section class="card">
+    <h2>Business</h2>
+    <dl class="facts">
+      <dt>Phone</dt>
+      <dd>{% if l.phone %}<a href="tel:{{ l.phone }}">{{ l.phone }}</a> · <a class="wa" href="https://wa.me/{{ l.phone|wa }}" target="_blank" rel="noopener">WhatsApp</a>{% else %}<span class="muted">—</span>{% endif %}</dd>
+      <dt>Website</dt>
+      <dd>{% if l.website %}<a href="{{ l.website }}" target="_blank" rel="noopener">{{ l.website }}</a>{% else %}<span class="tag none">None</span>{% endif %}</dd>
+      <dt>Rating</dt>
+      <dd>{% if l.rating %}★ {{ l.rating }} ({{ l.reviews }} reviews){% else %}<span class="muted">—</span>{% endif %}</dd>
+      <dt>Google status</dt><dd>{{ l.status or '—' }}</dd>
+      <dt>Map</dt><dd><a href="{{ l.maps_link }}" target="_blank" rel="noopener">Open in Google Maps</a></dd>
+      <dt>Score reasons</dt><dd>{{ l.score_reasons }}</dd>
+      <dt>Found in</dt><dd>{{ l.location|join(', ') }} · {{ l.categories|join(', ') }}</dd>
+      <dt>Added</dt><dd>{{ l.created_at|dt }}</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Pipeline</h2>
+    <dl class="facts">
+      <dt>Status</dt>
+      <dd><select data-field="lead_status" class="status s-{{ l.lead_status|lower|replace(' ', '-') }}">
+        {% for s in statuses %}<option {{ 'selected' if l.lead_status == s }}>{{ s }}</option>{% endfor %}
+      </select></dd>
+      <dt>Next follow-up</dt><dd><input type="date" data-field="next_follow_up" value="{{ l.next_follow_up }}"></dd>
+      <dt>Last contact</dt><dd>{{ l.last_contact or '—' }}</dd>
+      <dt>Deal ₹</dt><dd><input type="number" data-field="deal_value_inr" value="{{ l.deal_value_inr if l.deal_value_inr is not none }}" class="narrow" min="0"></dd>
+      <dt>Proposal</dt>
+      <dd><label class="check"><input type="checkbox" data-field="proposal_sent" {{ 'checked' if l.proposal_sent }}> Sent</label>
+        {% if l.proposal_sent_at %}<small class="muted">{{ l.proposal_sent_at|dt }}</small>{% endif %}</dd>
+      <dt>Notes</dt><dd><textarea data-field="notes" rows="3" placeholder="Add a note">{{ l.notes }}</textarea></dd>
+    </dl>
+  </section>
+</div>
+
+<section class="card" id="dispositions">
+  <h2>Dispositions ({{ (l.dispositions or [])|length }})</h2>
+  <form method="post" action="{{ url_for('create_disposition', place_id=l.place_id) }}" class="filters">
+    <select name="type" required>
+      <option value="">Type</option>
+      {% for t in types %}<option>{{ t }}</option>{% endfor %}
+    </select>
+    <select name="outcome" required>
+      <option value="">Outcome</option>
+      {% for o in outcomes %}<option>{{ o }}</option>{% endfor %}
+    </select>
+    <select name="lead_status" title="Change lead status">
+      <option value="">Keep status ({{ l.lead_status }})</option>
+      {% for s in statuses %}<option>{{ s }}</option>{% endfor %}
+    </select>
+    <label class="check">Follow-up <input type="date" name="next_follow_up" min="{{ today }}"></label>
+    <input type="text" name="note" placeholder="What happened?" class="grow">
+    <button type="submit">Add</button>
+  </form>
+  {% if l.dispositions %}
+  <table class="simple">
+    <thead><tr><th>When</th><th>Type</th><th>Outcome</th><th>Note</th><th>Status → </th><th>Follow-up</th></tr></thead>
+    <tbody>
+    {% for d in l.dispositions|reverse %}
+      <tr>
+        <td class="nowrap">{{ d.created_at|dt }}</td>
+        <td>{{ d.type }}</td>
+        <td><b>{{ d.outcome }}</b></td>
+        <td>{{ d.note }}</td>
+        <td>{{ d.lead_status or '' }}</td>
+        <td class="nowrap">{{ d.next_follow_up or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No dispositions yet. Log your first call or message above.</p>{% endif %}
+</section>
+
+<section class="card" id="proposals">
+  <h2>Proposals ({{ proposals|length }})</h2>
+  {% if l.phone %}
+  <p>
+    <select class="proposal-lang">
+      {% for v, label in [('hinglish','Hinglish'),('hindi','Hindi'),('english','English')] %}
+        <option value="{{ v }}" {{ 'selected' if l.proposal_language == v }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="write-proposal" data-wa="{{ l.phone|wa }}" data-reload="1">Write</button>
+  </p>
+  {% else %}<p class="muted">No phone number, so no WhatsApp proposal.</p>{% endif %}
+  {% for p in proposals|reverse %}
+    <div class="proposal">
+      <small class="muted">{{ (p.language or '')|capitalize }} · {{ p.created_at|dt }}</small>
+      <p class="msg">{{ p.message }}</p>
+      {% if l.phone %}<a class="btn secondary" href="https://wa.me/{{ l.phone|wa }}?text={{ p.message|urlencode }}" target="_blank" rel="noopener">Open in WhatsApp</a>{% endif %}
+      <button type="button" class="secondary" onclick="navigator.clipboard.writeText(this.parentNode.querySelector('.msg').innerText).then(() => show('Copied'))">Copy</button>
+    </div>
+  {% endfor %}
+</section>
+</div>
+
+{% include "_proposal_dialog.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='leads.js') }}"></script>
+{% endblock %}

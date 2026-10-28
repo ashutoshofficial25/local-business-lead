@@ -8,6 +8,7 @@
   <a class="stat warm" href="{{ url_for('index', group='Warm') }}"><b>{{ stats.warm }}</b><span>Warm leads</span></a>
   <a class="stat" href="{{ url_for('index', no_website=1) }}"><b>{{ stats.no_website }}</b><span>No website</span></a>
   <a class="stat" href="{{ url_for('index', follow_up_due=1, sort='follow_up') }}"><b>{{ stats.follow_up_due }}</b><span>Follow-ups due</span></a>
+  <a class="stat" href="{{ url_for('index', proposal='pending') }}"><b>{{ stats.proposal_pending }}</b><span>Proposal pending</span></a>
   <a class="stat won" href="{{ url_for('index', lead_status='Won') }}"><b>{{ stats.won }}</b><span>Won</span></a>
 </section>
 
@@ -31,6 +32,11 @@
     {% for l in locations %}<option {{ 'selected' if filters.location == l }}>{{ l }}</option>{% endfor %}
   </select>
   {% endif %}
+  <select name="proposal">
+    <option value="">Any proposal</option>
+    <option value="pending" {{ 'selected' if filters.proposal == 'pending' }}>Proposal pending</option>
+    <option value="sent" {{ 'selected' if filters.proposal == 'sent' }}>Proposal sent</option>
+  </select>
   <input type="number" name="min_reviews" value="{{ filters.min_reviews }}" placeholder="Min reviews" min="0" class="narrow">
   <label class="check"><input type="checkbox" name="no_website" value="1" {{ 'checked' if filters.no_website }}> No website</label>
   <label class="check"><input type="checkbox" name="follow_up_due" value="1" {{ 'checked' if filters.follow_up_due }}> Follow-up due</label>
@@ -63,7 +69,7 @@
   <thead>
     <tr>
       <th>Score</th><th>Business</th><th>Contact</th><th>Website</th><th>Rating</th>
-      <th>Status</th><th>Next follow-up</th><th>Notes</th><th>Deal ₹</th>
+      <th>Status</th><th>Proposal</th><th>Next follow-up</th><th>Notes</th><th>Deal ₹</th>
     </tr>
   </thead>
   <tbody>
@@ -71,7 +77,8 @@
     <tr data-id="{{ l.place_id }}">
       <td><span class="badge {{ l.group|lower }}" title="{{ l.score_reasons }}">{{ l.score }} · {{ l.group }}</span></td>
       <td class="biz">
-        <a href="{{ l.maps_link }}" target="_blank" rel="noopener"><b>{{ l.name }}</b></a>
+        <a href="{{ url_for('lead_detail', place_id=l.place_id) }}"><b>{{ l.name }}</b></a>
+        <a href="{{ l.maps_link }}" target="_blank" rel="noopener" class="muted">Map</a>
         <small>{{ l.category or (l.categories|join(', ')) }}</small>
         <small class="muted">{{ l.address }}</small>
       </td>
@@ -94,6 +101,17 @@
           {% for s in statuses %}<option {{ 'selected' if l.lead_status == s }}>{{ s }}</option>{% endfor %}
         </select>
       </td>
+      <td class="nowrap">
+        {% if l.phone %}
+          <select class="proposal-lang">
+            {% for v, label in [('hinglish','Hinglish'),('hindi','Hindi'),('english','English')] %}
+              <option value="{{ v }}" {{ 'selected' if l.proposal_language == v }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="write-proposal" data-wa="{{ l.phone|wa }}">Write</button><br>
+        {% endif %}
+        <label class="check"><input type="checkbox" data-field="proposal_sent" {{ 'checked' if l.proposal_sent }}> Sent</label>
+      </td>
       <td><input type="date" data-field="next_follow_up" value="{{ l.next_follow_up }}"></td>
       <td><textarea data-field="notes" rows="2" placeholder="Add a note">{{ l.notes }}</textarea></td>
       <td><input type="number" data-field="deal_value_inr" value="{{ l.deal_value_inr if l.deal_value_inr is not none }}" class="narrow" min="0"></td>
@@ -113,43 +131,9 @@
 {% endif %}
 {% endif %}
 
-<div id="toast" class="toast"></div>
+{% include "_proposal_dialog.html" %}
 {% endblock %}
 
 {% block scripts %}
-<script>
-  const toast = document.getElementById('toast');
-  function show(msg, bad) {
-    toast.textContent = msg;
-    toast.className = 'toast show' + (bad ? ' bad' : '');
-    clearTimeout(show.t);
-    show.t = setTimeout(() => toast.className = 'toast', 1500);
-  }
-  async function save(el) {
-    const row = el.closest('tr');
-    const body = {};
-    body[el.dataset.field] = el.value;
-    // Changing status away from New records today as the last contact date
-    if (el.dataset.field === 'lead_status' && el.value !== 'New') {
-      body.last_contact = new Date().toISOString().slice(0, 10);
-    }
-    try {
-      const res = await fetch('/api/leads/' + encodeURIComponent(row.dataset.id), {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error();
-      if (el.dataset.field === 'lead_status') {
-        el.className = 'status s-' + el.value.toLowerCase().replace(/ /g, '-');
-      }
-      show('Saved');
-    } catch (e) {
-      show('Could not save', true);
-    }
-  }
-  document.querySelectorAll('[data-field]').forEach(el => {
-    el.addEventListener('change', () => save(el));
-  });
-</script>
+<script src="{{ url_for('static', filename='leads.js') }}"></script>
 {% endblock %}
